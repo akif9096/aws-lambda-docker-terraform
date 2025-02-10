@@ -10,7 +10,7 @@ pipeline {
 	stages {
 		stage('Checkout') {
 			steps {
-				git 'https://github.com/akif9096/kk.git'
+				git 'https://github.com/akif9096/aws-lambda-docker-terraform.git'
 			}
 		}
 		stage('Terraform Apply - Phase 1') {
