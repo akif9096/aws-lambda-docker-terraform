@@ -1,0 +1,70 @@
+pipeline {
+	agent any
+	environment {
+		AWS_REGION = "us-east-1"
+		AWS_ACCOUNT_ID = "341361567458" // Replace with your account ID.
+		TF_VAR_aws_account_id = "${env.AWS_ACCOUNT_ID}"
+		TF_VAR_aws_region = "${env.AWS_REGION}"
+		// Set additional Terraform variables (e.g., RDS credentials) as needed.
+	}
+	stages {
+		stage('Checkout') {
+			steps {
+				git 'https://github.com/akif9096/kk.git'
+			}
+		}
+		stage('Terraform Apply - Phase 1') {
+			steps {
+				dir('terraform') {
+					// Run Terraform without creating Lambda (create_lambda variable = false)
+					sh 'terraform init'
+					sh 'terraform apply -auto-approve -var="create_lambda=false"'
+				}
+			}
+		}
+		stage('Build Docker Image') {
+			steps {
+				dir('app') {
+					sh 'docker build -t my-lambda-repo .'
+				}
+			}
+		}
+		stage('Push Docker Image to ECR') {
+			steps {
+				script {
+					def imageTag = "${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com/my-lambda-repo:latest"
+					// Tag the Docker image.
+					sh "docker tag my-lambda-repo:latest ${imageTag}"
+					// Log in to ECR.
+					sh "aws ecr get-login-password --region ${env.AWS_REGION} | docker login --username AWS --password-stdin ${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com"
+					// Push the image.
+					sh "docker push ${imageTag}"
+					//docker my-lambda-repo:latest "$env:AWS_ACCOUNT_ID.dkr.ecr.$env:AWS_REGION.amazonaws.com/my-lambda-repo:latest"
+
+				}
+			}
+		}
+		stage('Terraform Apply - Phase 2 (Create Lambda)') {
+			steps {
+				dir('terraform') {
+					// Now update/create the Lambda function with the pushed image.
+					sh 'terraform apply -auto-approve -var="create_lambda=true"'
+				}
+			}
+		}
+		stage('Test Lambda Function') {
+			steps {
+				// Optionally, invoke the Lambda function via AWS CLI.
+				sh 'aws lambda invoke --function-name $(terraform output -raw lambda_function_name) output.json'
+			}
+		}
+	}
+	post {
+		success {
+			echo "Pipeline executed successfully."
+		}
+		failure {
+			echo "Pipeline failed. Check the logs."
+		}
+	}
+}
